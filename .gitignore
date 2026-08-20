@@ -1,0 +1,21 @@
+# Node.js
+node_modules/
+package.json
+package-lock.yaml
+
+# Output files
+*.log
+*.tgz
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Sensitive data
+*.key
+*.secret
+extraction-report.json
