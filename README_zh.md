@@ -1,27 +1,10 @@
-<div align="center">
+# QQ Music 本地凭证逆向工程
 
-# 🔍 QQ Music 本地凭证逆向工程
+[English](README.md) | [中文](README_zh.md)
 
-<!-- 语言切换 -->
-<p>
-  <a href="README.md"><img src="https://img.shields.io/badge/English-English-blue?style=flat-square" alt="English"></a>
-  <a href="README_zh.md"><img src="https://img.shields.io/badge/中文-中文-red?style=flat-square" alt="中文"></a>
-</p>
+QQ 音乐桌面客户端本地凭证存储的逆向工程 — AES-128-CBC 加密分析、二进制密钥提取、MMKV/ConfigInfo/Cookie 解密研究。
 
-**深入剖析 QQ 音乐桌面客户端本地凭证存储 — AES-128-CBC 加密分析、二进制密钥提取、MMKV/ConfigInfo/Cookie 解密研究**
-
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Platform](https://img.shields.io/badge/platform-Windows-blue)]()
-[![Language](https://img.shields.io/badge/language-JavaScript-green)]()
-[![Stars](https://img.shields.io/github/stars/BlueChonk/qqmusic-credential-reverse-engineering?style=social)]()
-
-[🇨🇳 中文文档](README_zh.md) | [🇺🇸 English](README.md)
-
-</div>
-
----
-
-## 📋 目录
+## 目录
 
 - [概述](#概述)
 - [研究目标](#研究目标)
@@ -30,90 +13,83 @@
 - [成果总结](#成果总结)
 - [加密分析](#加密分析)
 - [失败尝试](#失败尝试)
-- [与 Trae 项目对比](#与-trae-项目对比)
 - [后续工作](#后续工作)
 - [免责声明](#免责声明)
 - [许可证](#许可证)
 
----
+## 概述
 
-## 🔬 概述
-
-本项目完整记录了 Windows 上 **QQ 音乐 (QQ音乐)** 桌面客户端本地凭证存储的逆向工程过程。目标是从本地存储中提取认证令牌、设备指纹和其他敏感数据，采用与 [trae-check](../trae-check) 项目相同的方法论。
+本项目完整记录了 Windows 上 QQ 音乐桌面客户端本地凭证存储的逆向工程过程。目标是从本地存储中提取认证令牌、设备指纹和其他敏感数据。
 
 **核心发现：**
-- QQ 音乐将数据存储在 `%APPDATA%\Tencent\QQMusic\` 下，包含 **18+ 个文件**
-- 三个关键文件使用 **AES-128-CBC** 加密（通过 `QMNetwork.dll` 中的 OpenSSL 字符串确认）
+
+- QQ 音乐将数据存储在 `%APPDATA%\Tencent\QQMusic\` 下，包含 18+ 个文件
+- 三个关键文件使用 AES-128-CBC 加密（通过 `QMNetwork.dll` 中的 OpenSSL 字符串确认）
 - `QQMusicCommon.dll` 中的 `CEncryptFile` 类管理加密/解密
 - 多个明文文件暴露了账号 ID、设备指纹、DNS 缓存和 API 端点
-- **AES 密钥无法通过静态二进制分析单独提取**
+- AES 密钥无法通过静态二进制分析单独提取
 
----
-
-## 🎯 研究目标
+## 研究目标
 
 目标是从 QQ 音乐本地存储中提取以下凭证字段：
 
 | 字段 | 说明 | 状态 |
 |---|---|---|
-| `token` | JWT 认证令牌 | ❌ 已加密 |
-| `refreshToken` | 刷新令牌 | ❌ 已加密 |
-| `expiresAt` | 令牌过期时间 | ❌ 已加密 |
-| `deviceId` | 设备指纹 ID | ⚠️ 部分 |
-| `machineId` | 机器硬件 ID | ❌ 已加密 |
-| `privateKeyPEM` | RSA 私钥 | ❌ 已加密 |
-| `publicKeyPEM` | RSA 公钥 | ❌ 已加密 |
-| `userId` | 用户账号标识 | ✅ 已找到 |
-| `host` | API 服务器地址 | ⚠️ 部分 |
-| `authInfo` | 完整认证信息对象 | ❌ 已加密 |
-| `signingKeyEntries` | 签名密钥条目 | ❌ 已加密 |
+| `token` | JWT 认证令牌 | 已加密 |
+| `refreshToken` | 刷新令牌 | 已加密 |
+| `expiresAt` | 令牌过期时间 | 已加密 |
+| `deviceId` | 设备指纹 ID | 部分获取 |
+| `machineId` | 机器硬件 ID | 已加密 |
+| `privateKeyPEM` | RSA 私钥 | 已加密 |
+| `publicKeyPEM` | RSA 公钥 | 已加密 |
+| `userId` | 用户账号标识 | 已找到 |
+| `host` | API 服务器地址 | 部分获取 |
+| `authInfo` | 完整认证信息对象 | 已加密 |
+| `signingKeyEntries` | 签名密钥条目 | 已加密 |
 
----
-
-## 🗺️ 数据存储地图
+## 数据存储地图
 
 ```
 %APPDATA%\Tencent\QQMusic\
 ├── WNS\
 │   └── 201915\
-│       ├── config.xml          ✅ 明文 — WNS 网络配置 (uin, deviceId, 服务器地址)
+│       ├── config.xml          [明文] — WNS 网络配置 (uin, deviceId, 服务器地址)
 │       └── data\
-│           ├── user.data       🔒 二进制 (进程锁定)
-│           └── report.data     🔒 二进制
+│           ├── user.data       [二进制] (进程锁定)
+│           └── report.data     [二进制]
 ├── ComData\
-│   └── qmcomdata.ini           ✅ 明文 — COM 数据 (uin, 路径)
-├── QQMusicServiceConfig.ini    ✅ 明文 — 服务配置 (Uin=2131899634)
-├── DomainCache.ini             ✅ 明文 — DNS 缓存 (API 服务器 IP)
-├── startup.ini                 ✅ 明文 — 启动配置 (硬件信息)
-├── WebkitCachePath.ini         ✅ 明文 — Webkit 缓存路径
-├── MonitorQQMusic.ini          ✅ 明文 — 监控配置
-├── QQMusicConfV3.dat           🔒 加密 — 主配置文件 (245KB, 可能含认证令牌)
-├── ConfigInfoXML1.dat          🔒 加密 — 配置 XML (270KB, 可能含完整认证信息)
-├── SetCookie.dat               🔒 加密 — Cookie (1.7KB, 登录 Cookie)
+│   └── qmcomdata.ini           [明文] — COM 数据 (uin, 路径)
+├── QQMusicServiceConfig.ini    [明文] — 服务配置 (Uin=2131899634)
+├── DomainCache.ini             [明文] — DNS 缓存 (API 服务器 IP)
+├── startup.ini                 [明文] — 启动配置 (硬件信息)
+├── WebkitCachePath.ini         [明文] — Webkit 缓存路径
+├── MonitorQQMusic.ini          [明文] — 监控配置
+├── QQMusicConfV3.dat           [加密] — 主配置文件 (245KB, 可能含认证令牌)
+├── ConfigInfoXML1.dat          [加密] — 配置 XML (270KB, 可能含完整认证信息)
+├── SetCookie.dat               [加密] — Cookie (1.7KB, 登录 Cookie)
 ├── mmkv\
-│   ├── mmkv.default            🔒 混淆 — MMKV 键值存储 (16KB)
-│   └── mmkv.default.crc        🔒 二进制 — MMKV CRC 数据
-├── qmlist64.db                 🔒 SQLite (锁定) — 音乐列表数据库
-├── weiyun.file.2131899634.v27.db  🔒 SQLite — 微云数据库
-├── block.dat                   🔒 二进制 — 黑名单数据
-├── CrashDump\                  📁 崩溃日志
-├── Pic\                        📁 皮肤资源
-├── SSN\                        📁 音效资源
-└── Logs\                       📁 应用日志
+│   ├── mmkv.default            [混淆] — MMKV 键值存储 (16KB)
+│   └── mmkv.default.crc        [二进制] — MMKV CRC 数据
+├── qmlist64.db                 [SQLite] (锁定) — 音乐列表数据库
+├── weiyun.file.2131899634.v27.db  [SQLite] — 微云数据库
+├── block.dat                   [二进制] — 黑名单数据
+├── CrashDump\                  崩溃日志
+├── Pic\                        皮肤资源
+├── SSN\                        音效资源
+└── Logs\                       应用日志
 ```
 
-此外，QQ 音乐使用 **腾讯 Qimei** 设备指纹服务：
+此外，QQ 音乐使用腾讯 Qimei 设备指纹服务：
+
 ```
 %APPDATA%\Tencent\qimei\
-├── A201CFB4C8D73FBE6916E0F5A2D14D39  🔒 128字节设备指纹哈希
-├── Config.ini                           🔒 16字节加密配置
-├── Global.db                            🔒 64字节全局数据
-└── RanMgr.db                            ✅ 明文 — Profile 配置 (5个MD5哈希)
+├── A201CFB4C8D73FBE6916E0F5A2D14D39  [加密] 128 字节设备指纹哈希
+├── Config.ini                           [加密] 16 字节加密配置
+├── Global.db                            [加密] 64 字节全局数据
+└── RanMgr.db                            [明文] — Profile 配置 (5 个 MD5 哈希)
 ```
 
----
-
-## 🔧 详细步骤
+## 详细步骤
 
 ### 步骤 1：定位数据存储
 
@@ -132,8 +108,6 @@ Get-ChildItem "C:\Program Files\Tencent\QQMusic" -Recurse -File
 
 **结果：** 找到 `%APPDATA%\Tencent\QQMusic\` 作为主数据目录，包含 18+ 个文件。
 
----
-
 ### 步骤 2：分析文件格式
 
 读取每个文件的前 64 字节以确定格式：
@@ -148,11 +122,9 @@ Get-ChildItem "C:\Program Files\Tencent\QQMusic" -Recurse -File
 | `qmlist64.db` | `53 51 4C 69 74 65 20 66 6F 72 6D 61 74 20 33 00` | SQLite |
 | `weiyun.file.*.db` | `53 51 4C 69 74 65 20 66 6F 72 6D 61 74 20 33 00` | SQLite |
 
----
-
 ### 步骤 3：提取明文数据
 
-#### 3.1 WNS 配置 (`config.xml`)
+#### 3.1 WNS 配置 (config.xml)
 
 ```xml
 <config>
@@ -169,18 +141,19 @@ Get-ChildItem "C:\Program Files\Tencent\QQMusic" -Recurse -File
 ```
 
 **解码后的 configCookie：**
+
 ```
 AudioPlayerP2P=36748&AudioPlayerP2P_ATV=42741&AudioPlayerP2P_PC=22525&RS=28461&WSL=3825915940&WS=14869
 ```
 
-#### 3.2 服务配置 (`QQMusicServiceConfig.ini`)
+#### 3.2 服务配置 (QQMusicServiceConfig.ini)
 
 ```ini
 [Account]
 Uin=2131899634
 ```
 
-#### 3.3 DNS 缓存 (`DomainCache.ini`)
+#### 3.3 DNS 缓存 (DomainCache.ini)
 
 ```ini
 [DomainCache]
@@ -191,7 +164,7 @@ isure.stream.qqmusic.qq.com=59.42.242.215
 ws.stream.qqmusic.qq.com=172.29.0.20
 ```
 
-#### 3.4 Qimei 设备指纹 (`RanMgr.db`)
+#### 3.4 Qimei 设备指纹 (RanMgr.db)
 
 ```ini
 [Profile]
@@ -212,20 +185,20 @@ const db = new DatabaseSync('path/to/localstorage.db');
 const rows = db.prepare('SELECT * FROM "ItemTable"').all();
 ```
 
-**本地存储 (`i2.y.qq.com`)：**
+**本地存储 (i2.y.qq.com)：**
+
 ```json
 {"key": "pc_alert_countdown_end", "value": "1786642509238"}
 {"key": "imusictjStockData", "value": "{...追踪数据...}"}
 ```
 
 **Cookie：**
+
 ```
 .qq.com    | fqm_pvqid | 244f761f-2783-4c5c-8ba0-414061248390
 .qq.com    | pgv_pvid  | 7951749250
 .y.qq.com  | ts_uid    | 5631091113
 ```
-
----
 
 ### 步骤 4：加密算法识别
 
@@ -241,7 +214,7 @@ crypto\init.c
 crypto\evp\digest.c
 id-aes128-wrap
 aes128-wrap
-AES-128-CBC        ← 关键发现！
+AES-128-CBC        <-- 关键发现
 AES128
 aes128
 id-aes192-wrap
@@ -250,7 +223,7 @@ AES-192-CBC
 AES-256-CBC
 ```
 
-**结论：** QQ 音乐使用 **OpenSSL** 配合 **AES-128-CBC** 作为主要加密算法。
+**结论：** QQ 音乐使用 OpenSSL 配合 AES-128-CBC 作为主要加密算法。
 
 #### 4.2 CEncryptFile 类分析
 
@@ -276,15 +249,13 @@ ConfigInfoXML1.dat:   熵 ≈ 7.86 bits/byte
 QQMusicConfV3.dat:    熵 ≈ 7.86 bits/byte
 ```
 
-熵接近 8.0 确认是**强加密**（AES 级别），而非简单 XOR 或替换密码。
-
----
+熵接近 8.0 确认是强加密（AES 级别），而非简单 XOR 或替换密码。
 
 ### 步骤 5：密钥提取尝试
 
 #### 5.1 高熵二进制扫描
 
-扫描 `QQMusicCommon.dll` 中熵 ≥ 3.85 的 16 字节序列：
+扫描 `QQMusicCommon.dll` 中熵 >= 3.85 的 16 字节序列：
 
 ```javascript
 // 在 EncryptData 函数附近搜索
@@ -298,7 +269,7 @@ for (let i = searchStart; i < searchEnd - 16; i++) {
 }
 ```
 
-**结果：** 在 `EncryptData` 附近找到 914 个候选，整个二进制中找到 41,386 个候选。**全部解密失败。**
+**结果：** 在 `EncryptData` 附近找到 914 个候选，整个二进制中找到 41,386 个候选。全部解密失败。
 
 #### 5.2 已知明文攻击
 
@@ -338,9 +309,7 @@ const commonKeys = [
 
 **结果：** 全部失败。
 
----
-
-## 📊 成果总结
+## 成果总结
 
 ### 成功提取
 
@@ -383,13 +352,12 @@ const commonKeys = [
 | `SetCookie.dat` | 1.7 KB | 登录 Cookie、会话令牌 |
 | `mmkv.default` | 16 KB | 运行时键值存储 (令牌缓存?) |
 
----
-
-## 🔐 加密分析
+## 加密分析
 
 ### 算法：AES-128-CBC (已确认)
 
 **证据：**
+
 1. `QMNetwork.dll` 导入了 OpenSSL，包含 `AES-128-CBC` 字符串字面量
 2. `QQMusicCommon.dll` 包含 `CEncryptFile` 类及 `EncryptData`/`DecryptData` 方法
 3. 加密文件熵值 ~7.86 bits/byte (与 AES 输出一致)
@@ -408,11 +376,9 @@ const commonKeys = [
 [16 字节 IV][AES-128-CBC 加密数据][可选填充]
 ```
 
-或类似 Trae 信封结构的自定义头部格式。
+或类似的自定义头部格式。
 
----
-
-## ❌ 失败尝试
+## 失败尝试
 
 | 尝试 | 方法 | 结果 |
 |---|---|---|
@@ -426,22 +392,7 @@ const commonKeys = [
 | 文件名哈希密钥 | MD5/SHA256 文件名 | 全部失败 |
 | 常见密钥 | ASCII 模式 | 全部失败 |
 
----
-
-## 📊 与 Trae 项目对比
-
-| 方面 | Trae SOLO CN | QQ 音乐 |
-|---|---|---|
-| **加密方式** | AES-128-CBC | AES-128-CBC |
-| **密钥存储** | 硬编码 `LEFT_SECRET` + `RIGHT_SECRET` (64字节数组) | 未知 (`CEncryptFile` 类) |
-| **信封格式** | HEADER(6) + randomKey(32) + AES-CBC(SHA512+payload) | 未知 (可能为 IV + AES-CBC) |
-| **密钥提取** | ✅ 成功 (静态二进制分析) | ❌ 失败 (密钥不在明显位置) |
-| **明文文件** | `storage.json` (加密) | `config.xml`, `*.ini` (明文) |
-| **数据丰富度** | 完整认证链 (token, RSA密钥, 签名密钥) | 部分 (账号ID, 设备ID, 服务器地址) |
-
----
-
-## 🔮 后续工作
+## 后续工作
 
 要完全破解 QQ 音乐加密文件，建议采用以下方法：
 
@@ -462,18 +413,16 @@ const commonKeys = [
 
 4. **内存转储分析**
    - 在活动会话期间转储进程内存
-   - 搜索令牌模式 (JWT, 会话ID等)
+   - 搜索令牌模式 (JWT, 会话 ID 等)
    - 从堆/栈提取凭证
 
 5. **跨机器对比**
    - 比较不同机器上的加密文件
    - 识别机器特定组件与通用密钥组件
 
----
+## 免责声明
 
-## ⚠️ 免责声明
-
-本项目仅供**教育和研究目的**。所述技术旨在：
+本项目仅供教育和研究目的。所述技术旨在：
 - 理解桌面应用安全性
 - 改进凭证保护机制
 - 推进逆向工程知识
@@ -483,18 +432,6 @@ const commonKeys = [
 - 绕过许可或访问控制
 - 违反 QQ 音乐的服务条款
 
----
-
-## 📄 许可证
+## 许可证
 
 [MIT 许可证](LICENSE) — 可自由使用、修改和分发。
-
----
-
-<div align="center">
-
-⭐ **如果觉得有用，请给个 Star！** ⭐
-
-[🇨🇳 中文文档](README_zh.md) | [🇺🇸 English](README.md)
-
-</div>

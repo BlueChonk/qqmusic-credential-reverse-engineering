@@ -1,27 +1,10 @@
-<div align="center">
+# QQ Music Credential Reverse Engineering
 
-# 🔍 QQ Music Credential Reverse Engineering
+[English](README.md) | [中文](README_zh.md)
 
-<!-- Language Switcher -->
-<p>
-  <a href="README.md"><img src="https://img.shields.io/badge/English-English-blue?style=flat-square" alt="English"></a>
-  <a href="README_zh.md"><img src="https://img.shields.io/badge/中文-中文-red?style=flat-square" alt="中文"></a>
-</p>
+Reverse engineering of QQ Music desktop client's local credential storage on Windows — AES-128-CBC encryption analysis, binary key extraction, MMKV/ConfigInfo/Cookie decryption research.
 
-**Deep dive into QQ Music's local credential storage — AES-128-CBC encryption analysis, binary key extraction, MMKV/ConfigInfo/Cookie decryption research**
-
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Platform](https://img.shields.io/badge/platform-Windows-blue)]()
-[![Language](https://img.shields.io/badge/language-JavaScript-green)]()
-[![Stars](https://img.shields.io/github/stars/BlueChonk/qqmusic-credential-reverse-engineering?style=social)]()
-
-[🇨🇳 中文文档](README_zh.md) | [🇺🇸 English](README.md)
-
-</div>
-
----
-
-## 📋 Table of Contents
+## Table of Contents
 
 - [Overview](#overview)
 - [Research Target](#research-target)
@@ -30,90 +13,83 @@
 - [Results Summary](#results-summary)
 - [Encryption Analysis](#encryption-analysis)
 - [Failed Attempts](#failed-attempts)
-- [Comparison with Trae Project](#comparison-with-trae-project)
 - [Future Work](#future-work)
 - [Disclaimer](#disclaimer)
 - [License](#license)
 
----
+## Overview
 
-## 🔬 Overview
-
-This project documents the complete reverse engineering process of **QQ Music (QQ音乐)** desktop client's local credential storage on Windows. The goal is to extract authentication tokens, device fingerprints, and other sensitive data from the local storage — mirroring the approach used in the [trae-check](../trae-check) project.
+This project documents the complete reverse engineering process of QQ Music desktop client's local credential storage on Windows. The goal is to extract authentication tokens, device fingerprints, and other sensitive data from the local storage.
 
 **Key Findings:**
-- QQ Music stores data in `%APPDATA%\Tencent\QQMusic\` with **18+ files**
-- Three critical files are encrypted with **AES-128-CBC** (identified via OpenSSL strings in `QMNetwork.dll`)
+
+- QQ Music stores data in `%APPDATA%\Tencent\QQMusic\` with 18+ files
+- Three critical files are encrypted with AES-128-CBC (identified via OpenSSL strings in `QMNetwork.dll`)
 - The `CEncryptFile` class in `QQMusicCommon.dll` manages encryption/decryption
 - Multiple plaintext files expose account IDs, device fingerprints, DNS cache, and API endpoints
-- **AES key was NOT extractable** via static binary analysis alone
+- AES key was NOT extractable via static binary analysis alone
 
----
-
-## 🎯 Research Target
+## Research Target
 
 The goal is to extract the following credential fields from QQ Music's local storage:
 
 | Field | Description | Status |
 |---|---|---|
-| `token` | JWT auth token for API calls | ❌ Encrypted |
-| `refreshToken` | Token refresh credential | ❌ Encrypted |
-| `expiresAt` | Token expiration timestamp | ❌ Encrypted |
-| `deviceId` | Device fingerprint ID | ⚠️ Partial |
-| `machineId` | Machine hardware ID | ❌ Encrypted |
-| `privateKeyPEM` | RSA private key | ❌ Encrypted |
-| `publicKeyPEM` | RSA public key | ❌ Encrypted |
-| `userId` | User account identifier | ✅ Found |
-| `host` | API server addresses | ⚠️ Partial |
-| `authInfo` | Complete auth info object | ❌ Encrypted |
-| `signingKeyEntries` | Signing key entries | ❌ Encrypted |
+| `token` | JWT auth token for API calls | Encrypted |
+| `refreshToken` | Token refresh credential | Encrypted |
+| `expiresAt` | Token expiration timestamp | Encrypted |
+| `deviceId` | Device fingerprint ID | Partial |
+| `machineId` | Machine hardware ID | Encrypted |
+| `privateKeyPEM` | RSA private key | Encrypted |
+| `publicKeyPEM` | RSA public key | Encrypted |
+| `userId` | User account identifier | Found |
+| `host` | API server addresses | Partial |
+| `authInfo` | Complete auth info object | Encrypted |
+| `signingKeyEntries` | Signing key entries | Encrypted |
 
----
-
-## 🗺️ Data Storage Map
+## Data Storage Map
 
 ```
 %APPDATA%\Tencent\QQMusic\
 ├── WNS\
 │   └── 201915\
-│       ├── config.xml          ✅ PLAIN TEXT — WNS network config (uin, deviceId, hosts)
+│       ├── config.xml          [PLAIN TEXT] — WNS network config (uin, deviceId, hosts)
 │       └── data\
-│           ├── user.data       🔒 Binary (locked by process)
-│           └── report.data     🔒 Binary
+│           ├── user.data       [BINARY] (locked by process)
+│           └── report.data     [BINARY]
 ├── ComData\
-│   └── qmcomdata.ini           ✅ PLAIN TEXT — COM data (uin, path)
-├── QQMusicServiceConfig.ini    ✅ PLAIN TEXT — Service config (Uin=2131899634)
-├── DomainCache.ini             ✅ PLAIN TEXT — DNS cache (API server IPs)
-├── startup.ini                 ✅ PLAIN TEXT — Startup config (hardware info)
-├── WebkitCachePath.ini         ✅ PLAIN TEXT — Webkit cache path
-├── MonitorQQMusic.ini          ✅ PLAIN TEXT — Monitor config
-├── QQMusicConfV3.dat           🔒 ENCRYPTED — Main config (245KB, likely auth tokens)
-├── ConfigInfoXML1.dat          🔒 ENCRYPTED — Config XML (270KB, likely full auth info)
-├── SetCookie.dat               🔒 ENCRYPTED — Cookies (1.7KB, login cookies)
+│   └── qmcomdata.ini           [PLAIN TEXT] — COM data (uin, path)
+├── QQMusicServiceConfig.ini    [PLAIN TEXT] — Service config (Uin=2131899634)
+├── DomainCache.ini             [PLAIN TEXT] — DNS cache (API server IPs)
+├── startup.ini                 [PLAIN TEXT] — Startup config (hardware info)
+├── WebkitCachePath.ini         [PLAIN TEXT] — Webkit cache path
+├── MonitorQQMusic.ini          [PLAIN TEXT] — Monitor config
+├── QQMusicConfV3.dat           [ENCRYPTED] — Main config (245KB, likely auth tokens)
+├── ConfigInfoXML1.dat          [ENCRYPTED] — Config XML (270KB, likely full auth info)
+├── SetCookie.dat               [ENCRYPTED] — Cookies (1.7KB, login cookies)
 ├── mmkv\
-│   ├── mmkv.default            🔒 OBFUSCATED — MMKV key-value store (16KB)
-│   └── mmkv.default.crc        🔒 Binary — MMKV CRC data
-├── qmlist64.db                 🔒 SQLite (locked) — Music playlist database
-├── weiyun.file.2131899634.v27.db  🔒 SQLite — Weiyun cloud storage DB
-├── block.dat                   🔒 Binary — Blocklist data
-├── CrashDump\                  📁 Crash dump logs
-├── Pic\                        📁 Skin resources
-├── SSN\                        📁 Sound effect resources
-└── Logs\                       📁 Application logs
+│   ├── mmkv.default            [OBFUSCATED] — MMKV key-value store (16KB)
+│   └── mmkv.default.crc        [BINARY] — MMKV CRC data
+├── qmlist64.db                 [SQLite] (locked) — Music playlist database
+├── weiyun.file.2131899634.v27.db  [SQLite] — Weiyun cloud storage DB
+├── block.dat                   [BINARY] — Blocklist data
+├── CrashDump\                  Crash dump logs
+├── Pic\                        Skin resources
+├── SSN\                        Sound effect resources
+└── Logs\                       Application logs
 ```
 
-Additionally, QQ Music uses **Tencent Qimei** device fingerprinting service:
+Additionally, QQ Music uses Tencent Qimei device fingerprinting service:
+
 ```
 %APPDATA%\Tencent\qimei\
-├── A201CFB4C8D73FBE6916E0F5A2D14D39  🔒 128-byte device fingerprint hash
-├── Config.ini                           🔒 16-byte encrypted config
-├── Global.db                            🔒 64-byte global data
-└── RanMgr.db                            ✅ PLAIN TEXT — Profile configs (5 MD5 hashes)
+├── A201CFB4C8D73FBE6916E0F5A2D14D39  [ENCRYPTED] 128-byte device fingerprint hash
+├── Config.ini                           [ENCRYPTED] 16-byte encrypted config
+├── Global.db                            [ENCRYPTED] 64-byte global data
+└── RanMgr.db                            [PLAIN TEXT] — Profile configs (5 MD5 hashes)
 ```
 
----
-
-## 🔧 Step-by-Step Process
+## Step-by-Step Process
 
 ### Step 1: Locate Data Storage
 
@@ -132,8 +108,6 @@ Get-ChildItem "C:\Program Files\Tencent\QQMusic" -Recurse -File
 
 **Result:** Found `%APPDATA%\Tencent\QQMusic\` as the primary data directory with 18+ files.
 
----
-
 ### Step 2: Analyze File Formats
 
 Read the first 64 bytes of each file to determine format:
@@ -148,11 +122,9 @@ Read the first 64 bytes of each file to determine format:
 | `qmlist64.db` | `53 51 4C 69 74 65 20 66 6F 72 6D 61 74 20 33 00` | SQLite |
 | `weiyun.file.*.db` | `53 51 4C 69 74 65 20 66 6F 72 6D 61 74 20 33 00` | SQLite |
 
----
-
 ### Step 3: Extract Plaintext Data
 
-#### 3.1 WNS Config (`config.xml`)
+#### 3.1 WNS Config (config.xml)
 
 ```xml
 <config>
@@ -169,18 +141,19 @@ Read the first 64 bytes of each file to determine format:
 ```
 
 **Decoded configCookie:**
+
 ```
 AudioPlayerP2P=36748&AudioPlayerP2P_ATV=42741&AudioPlayerP2P_PC=22525&RS=28461&WSL=3825915940&WS=14869
 ```
 
-#### 3.2 Service Config (`QQMusicServiceConfig.ini`)
+#### 3.2 Service Config (QQMusicServiceConfig.ini)
 
 ```ini
 [Account]
 Uin=2131899634
 ```
 
-#### 3.3 DNS Cache (`DomainCache.ini`)
+#### 3.3 DNS Cache (DomainCache.ini)
 
 ```ini
 [DomainCache]
@@ -191,7 +164,7 @@ isure.stream.qqmusic.qq.com=59.42.242.215
 ws.stream.qqmusic.qq.com=172.29.0.20
 ```
 
-#### 3.4 Qimei Device Fingerprint (`RanMgr.db`)
+#### 3.4 Qimei Device Fingerprint (RanMgr.db)
 
 ```ini
 [Profile]
@@ -202,7 +175,7 @@ config4=3a24b6d78920b969577820e04eb1160c
 config5=1
 ```
 
-#### 3.5 Webkit Cache (Local Storage & Cookies)
+#### 3.5 Webkit Cache (Local Storage and Cookies)
 
 Using Node.js built-in `node:sqlite` module to read Chromium SQLite databases:
 
@@ -212,20 +185,20 @@ const db = new DatabaseSync('path/to/localstorage.db');
 const rows = db.prepare('SELECT * FROM "ItemTable"').all();
 ```
 
-**Local Storage (`i2.y.qq.com`):**
+**Local Storage (i2.y.qq.com):**
+
 ```json
 {"key": "pc_alert_countdown_end", "value": "1786642509238"}
 {"key": "imusictjStockData", "value": "{...tracking data...}"}
 ```
 
 **Cookies:**
+
 ```
 .qq.com    | fqm_pvqid | 244f761f-2783-4c5c-8ba0-414061248390
 .qq.com    | pgv_pvid  | 7951749250
 .y.qq.com  | ts_uid    | 5631091113
 ```
-
----
 
 ### Step 4: Encryption Algorithm Identification
 
@@ -241,7 +214,7 @@ crypto\init.c
 crypto\evp\digest.c
 id-aes128-wrap
 aes128-wrap
-AES-128-CBC        ← Key finding!
+AES-128-CBC        <-- Key finding
 AES128
 aes128
 id-aes192-wrap
@@ -250,7 +223,7 @@ AES-192-CBC
 AES-256-CBC
 ```
 
-**Conclusion:** QQ Music uses **OpenSSL** with **AES-128-CBC** as the primary encryption algorithm.
+**Conclusion:** QQ Music uses OpenSSL with AES-128-CBC as the primary encryption algorithm.
 
 #### 4.2 CEncryptFile Class Analysis
 
@@ -276,15 +249,13 @@ ConfigInfoXML1.dat:   entropy = ~7.86 bits/byte
 QQMusicConfV3.dat:    entropy = ~7.86 bits/byte
 ```
 
-Entropy close to 8.0 confirms **strong encryption** (AES-like), not simple XOR or substitution.
-
----
+Entropy close to 8.0 confirms strong encryption (AES-like), not simple XOR or substitution.
 
 ### Step 5: Key Extraction Attempts
 
 #### 5.1 High-Entropy Binary Scanning
 
-Scanned `QQMusicCommon.dll` for 16-byte sequences with entropy ≥ 3.85:
+Scanned `QQMusicCommon.dll` for 16-byte sequences with entropy >= 3.85:
 
 ```javascript
 // Search near EncryptData function
@@ -298,7 +269,7 @@ for (let i = searchStart; i < searchEnd - 16; i++) {
 }
 ```
 
-**Result:** 914 candidates found near `EncryptData`, 41,386 candidates across entire binary. **None successfully decrypted the files.**
+**Result:** 914 candidates found near `EncryptData`, 41,386 candidates across entire binary. None successfully decrypted the files.
 
 #### 5.2 Known-Plaintext Attack
 
@@ -338,9 +309,7 @@ const commonKeys = [
 
 **Result:** All failed.
 
----
-
-## 📊 Results Summary
+## Results Summary
 
 ### Successfully Extracted
 
@@ -383,13 +352,12 @@ const commonKeys = [
 | `SetCookie.dat` | 1.7 KB | Login cookies, session tokens |
 | `mmkv.default` | 16 KB | Runtime key-value store (token cache?) |
 
----
-
-## 🔐 Encryption Analysis
+## Encryption Analysis
 
 ### Algorithm: AES-128-CBC (Confirmed)
 
 **Evidence:**
+
 1. `QMNetwork.dll` imports OpenSSL with `AES-128-CBC` string literals
 2. `QQMusicCommon.dll` contains `CEncryptFile` class with `EncryptData`/`DecryptData` methods
 3. Encrypted files have entropy ~7.86 bits/byte (consistent with AES output)
@@ -408,11 +376,9 @@ The `CEncryptFile` class likely manages:
 [16 bytes IV][AES-128-CBC encrypted data][optional padding]
 ```
 
-Or possibly a custom header format similar to Trae's envelope structure.
+Or possibly a custom header format.
 
----
-
-## ❌ Failed Attempts
+## Failed Attempts
 
 | Attempt | Method | Result |
 |---|---|---|
@@ -426,22 +392,7 @@ Or possibly a custom header format similar to Trae's envelope structure.
 | Filename hash keys | MD5/SHA256 of filenames | All failed |
 | Common keys | ASCII patterns | All failed |
 
----
-
-## 📊 Comparison with Trae Project
-
-| Aspect | Trae SOLO CN | QQ Music |
-|---|---|---|
-| **Encryption** | AES-128-CBC | AES-128-CBC |
-| **Key Storage** | Hardcoded `LEFT_SECRET` + `RIGHT_SECRET` (64-byte arrays) | Unknown (`CEncryptFile` class) |
-| **Envelope Format** | HEADER(6) + randomKey(32) + AES-CBC(SHA512+payload) | Unknown (possibly IV + AES-CBC) |
-| **Key Extraction** | ✅ Successful (static binary analysis) | ❌ Failed (key not in obvious location) |
-| **Plaintext Files** | `storage.json` (encrypted) | `config.xml`, `*.ini` (plaintext) |
-| **Data Richness** | Full auth chain (token, RSA keys, signing keys) | Partial (account ID, device ID, hosts) |
-
----
-
-## 🔮 Future Work
+## Future Work
 
 To fully decrypt QQ Music's encrypted files, the following approaches are recommended:
 
@@ -469,11 +420,9 @@ To fully decrypt QQ Music's encrypted files, the following approaches are recomm
    - Compare encrypted files across different machines
    - Identify machine-specific vs. universal key components
 
----
+## Disclaimer
 
-## ⚠️ Disclaimer
-
-This project is for **educational and research purposes only**. The techniques described are intended to:
+This project is for educational and research purposes only. The techniques described are intended to:
 - Understand desktop application security
 - Improve credential protection mechanisms
 - Advance reverse engineering knowledge
@@ -483,18 +432,6 @@ This project is for **educational and research purposes only**. The techniques d
 - Circumvent license or access controls
 - Violate QQ Music's Terms of Service
 
----
-
-## 📄 License
+## License
 
 [MIT License](LICENSE) — Feel free to use, modify, and distribute.
-
----
-
-<div align="center">
-
-⭐ **Star this repo if you find it useful!** ⭐
-
-[🇨🇳 中文文档](README_zh.md) | [🇺🇸 English](README.md)
-
-</div>
